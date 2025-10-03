@@ -2,16 +2,25 @@
 
 ## Overview
 
-The TTS system converts timestamped SRT script files into synchronized speech audio using the ElevenLabs Text-to-Speech API. It's a critical component of the STEMViz pipeline that generates natural-sounding narration timed to match the visual animations.
+The TTS system converts timestamped SRT script files into synchronized speech audio using a multi-provider architecture supporting ElevenLabs and OpenAI Text-to-Speech APIs. It's a critical component of the STEMViz pipeline that generates natural-sounding narration timed to match the visual animations.
 
 ## Architecture
 
-### Core Component: `AudioSynthesizer`
+### Core Components
 
-Located in `generation/audio_synthesizer.py`, the `AudioSynthesizer` class handles:
+The TTS system uses a provider-based architecture with:
 
+- **Base Class**: `BaseTTSSynthesizer` in `generation/tts/base.py`
+- **Providers**: 
+  - `ElevenLabsTTSSynthesizer` in `generation/tts/elevenlabs_provider.py`
+  - `OpenAITTSSynthesizer` in `generation/tts/openai_provider.py`
+- **Factory Method**: Provider selection in `pipeline.py`
+
+### Common Functionality
+
+All providers handle:
 - SRT file parsing and timestamp extraction
-- Individual audio segment generation via ElevenLabs API
+- Individual audio segment generation via provider APIs
 - Audio concatenation with precise timing synchronization
 - Duration validation and silence padding
 - Error handling with retry logic
@@ -61,19 +70,43 @@ class AudioResult(BaseModel):
 - **Purpose**: Match audio duration to video length
 - **Behavior**: Adds silence padding if audio is shorter than target
 
+### Provider Selection
+- **Environment Variable**: `TTS_PROVIDER`
+- **Options**: `elevenlabs` (default), `openai`
+- **Configuration**: Provider-specific settings in `config.py`
+
 ## Configuration
 
 ### TTS Settings (from `config.py`)
 
+#### Provider Selection
 ```python
-tts_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"        # ElevenLabs voice ID
-tts_model_id: str = "eleven_multilingual_v2"       # TTS model
-tts_stability: float = 0.75                       # Voice stability (0-1)
-tts_similarity_boost: float = 0.75                # Similarity boost (0-1)
-tts_style: float = 0.0                            # Style exaggeration (0-1)
-tts_use_speaker_boost: bool = True                # Enhance voice clarity
-tts_max_retries: int = 3                          # API call retry attempts
-tts_timeout: int = 120                            # Request timeout (seconds)
+tts_provider: str = "elevenlabs"  # "elevenlabs", "openai"
+```
+
+#### ElevenLabs Settings
+```python
+elevenlabs_voice_id: str = "JBFqnCBsd6RMkjVDRZzb"
+elevenlabs_model_id: str = "eleven_multilingual_v2"
+elevenlabs_stability: float = 0.75
+elevenlabs_similarity_boost: float = 0.75
+elevenlabs_style: float = 0.0
+elevenlabs_use_speaker_boost: bool = True
+```
+
+#### OpenAI Settings
+```python
+openai_voice: str = "alloy"           # alloy, echo, fable, onyx, nova, shimmer
+openai_model: str = "tts-1"           # tts-1, tts-1-hd
+openai_endpoint: str = ""             # Custom endpoint (optional)
+openai_response_format: str = "mp3"   # mp3, opus, aac, flac
+openai_speed: float = 1.0             # 0.25 to 4.0
+```
+
+#### Common Settings
+```python
+tts_max_retries: int = 3              # API call retry attempts
+tts_timeout: int = 120                # Request timeout (seconds)
 ```
 
 ### Voice Settings Explained
@@ -124,10 +157,15 @@ For each subtitle:
 ## Dependencies
 
 ### External APIs
-- **ElevenLabs TTS API**: Primary text-to-speech service
+- **ElevenLabs TTS API**: High-quality text-to-speech service
   - Requires API key (`ELEVENLABS_API_KEY` environment variable)
-  - Supports multiple voices and models
+  - Supports 1000+ voices and multiple models
   - Rate limiting and quota management
+
+- **OpenAI TTS API**: Fast and reliable text-to-speech service
+  - Requires API key (`OPENAI_API_KEY` environment variable)
+  - Supports 6 built-in voices and 2 models
+  - Custom endpoint support via `OPENAI_ENDPOINT`
 
 ### Python Libraries
 - `elevenlabs>=1.0.0`: TTS API client
@@ -144,20 +182,79 @@ For each subtitle:
 ### Pipeline Integration
 Called from `pipeline.py` in Phase 4:
 ```python
-audio_result = self._execute_audio_synthesis(script_path, target_duration)
+audio_result = self._execute_audio_synthesis(
+    script_path, target_duration
+)
 ```
 
 ### Configuration Integration
-Initialized with settings from `config.py`:
+Provider selected and initialized based on settings:
 ```python
-self.audio_synthesizer = AudioSynthesizer(
-    api_key=settings.elevenlabs_api_key,
-    output_dir=settings.output_dir / "audio",
-    voice_id=settings.tts_voice_id,
-    model_id=settings.tts_model_id,
-    # ... other settings
-)
+# In pipeline.py _create_tts_synthesizer():
+if settings.tts_provider == "elevenlabs":
+    return ElevenLabsTTSSynthesizer(
+        api_key=settings.elevenlabs_api_key,
+        output_dir=settings.audio_dir,
+        voice_id=settings.elevenlabs_voice_id,
+        model_id=settings.elevenlabs_model_id,
+        # ... other ElevenLabs settings
+    )
+elif settings.tts_provider == "openai":
+    return OpenAITTSSynthesizer(
+        api_key=settings.openai_api_key,
+        output_dir=settings.audio_dir,
+        voice=settings.openai_voice,
+        model=settings.openai_model,
+        base_url=settings.openai_endpoint or None,
+        # ... other OpenAI settings
+    )
 ```
+
+### Adding New Providers
+
+To add a new TTS provider:
+
+1. **Create Provider Class**:
+```python
+# generation/tts/newprovider_provider.py
+from .base import BaseTTSSynthesizer, AudioResult
+
+class NewProviderTTSSynthesizer(BaseTTSSynthesizer):
+    def __init__(self, api_key: str, output_dir: Path, **kwargs):
+        super().__init__(api_key, output_dir, **kwargs)
+        # Initialize provider-specific client
+    
+    def execute(self, script_path: str, target_duration: Optional[float] = None) -> AudioResult:
+        # Implement provider-specific synthesis
+        pass
+```
+
+2. **Update Configuration**:
+```python
+# In config.py
+newprovider_voice: str = "default"
+newprovider_model: str = "model-name"
+newprovider_api_key: str = Field(..., env="NEWPROVIDER_API_KEY")
+```
+
+3. **Update Pipeline**:
+```python
+# In pipeline.py _create_tts_synthesizer():
+elif settings.tts_provider == "newprovider":
+    return NewProviderTTSSynthesizer(
+        api_key=settings.newprovider_api_key,
+        output_dir=settings.audio_dir,
+        voice=settings.newprovider_voice,
+        model=settings.newprovider_model
+    )
+```
+
+### Key Considerations
+1. **Timing Precision**: Maintain exact synchronization with SRT timestamps
+2. **Audio Format**: Output MP3 with consistent quality
+3. **Error Handling**: Implement retry logic and graceful failures
+4. **Configuration**: Use environment variables for API keys and settings
+5. **Rate Limiting**: Handle provider-specific API limits
 
 ### Error Handling
 - Graceful degradation on API failures
@@ -179,42 +276,10 @@ self.audio_synthesizer = AudioSynthesizer(
 
 ### API Usage
 - One API call per subtitle segment
-- Token usage varies by text length
-- Subject to ElevenLabs rate limits and quotas
-
-## Provider Migration Guide
-
-To swap TTS providers, implement a new class with the same interface:
-
-### Required Methods
-```python
-class NewTTSSynthesizer:
-    def __init__(self, api_key: str, output_dir: Path, **kwargs):
-        # Initialize provider-specific client
-        pass
-    
-    def execute(self, script_path: str, target_duration: Optional[float] = None) -> AudioResult:
-        # Main synthesis method - must return AudioResult
-        pass
-    
-    def cleanup_temp_files(self):
-        # Clean up temporary files
-        pass
-    
-    def get_synthesis_stats(self) -> Dict[str, Any]:
-        # Return provider statistics
-        pass
-```
-
-### Key Considerations
-1. **Timing Precision**: Maintain exact synchronization with SRT timestamps
-2. **Audio Format**: Output MP3 with consistent quality
-3. **Error Handling**: Implement retry logic and graceful failures
-4. **Configuration**: Map provider-specific settings to existing config
-5. **Rate Limiting**: Handle provider-specific API limits
-
-### Configuration Mapping
-Update `config.py` to include provider-specific settings while maintaining backward compatibility.
+- Character usage varies by text length and provider
+- Subject to provider-specific rate limits and quotas
+- **ElevenLabs**: Character-based pricing, rate limited
+- **OpenAI**: Character-based pricing, faster response
 
 ## Testing
 
@@ -245,11 +310,13 @@ uv run test_gradient_descent.py
 ## Troubleshooting
 
 ### Common Issues
-1. **API Key Errors**: Verify `ELEVENLABS_API_KEY` environment variable
-2. **Timing Mismatches**: Check SRT format and timestamp parsing
-3. **Audio Quality**: Adjust voice settings (stability, similarity_boost)
-4. **Rate Limiting**: Increase timeout or reduce concurrent requests
-5. **File Permissions**: Ensure write access to output directory
+1. **API Key Errors**: Verify `ELEVENLABS_API_KEY` or `OPENAI_API_KEY` environment variables
+2. **Provider Selection**: Check `TTS_PROVIDER` environment variable
+3. **Timing Mismatches**: Check SRT format and timestamp parsing
+4. **Audio Quality**: Adjust provider-specific voice settings
+5. **Custom Endpoints**: Verify `OPENAI_ENDPOINT` if using custom OpenAI endpoint
+6. **Rate Limiting**: Increase timeout or reduce concurrent requests
+7. **File Permissions**: Ensure write access to output directory
 
 ### Debug Logging
 Enable debug logging to trace:
@@ -267,10 +334,10 @@ Enable debug logging to trace:
 4. **Quality Optimization**: Adaptive bitrate and compression
 5. **Multi-language Support**: Enhanced language detection and switching
 
-### Provider Alternatives
-Consider these providers for migration:
-- OpenAI TTS API
+### Additional Providers
+Consider these providers for future implementation:
 - Google Cloud Text-to-Speech
 - Microsoft Azure Speech Services
 - Amazon Polly
 - Coqui TTS (open-source)
+- Local TTS servers (OpenAI-compatible)

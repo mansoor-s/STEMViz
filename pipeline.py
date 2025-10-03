@@ -227,7 +227,7 @@ class Pipeline:
                 "models_used": {
                     "reasoning": settings.reasoning_model,
                     "multimodal": settings.multimodal_model,
-                    "tts": settings.tts_model_id
+                    "tts": settings.elevenlabs_model_id if settings.tts_provider == "elevenlabs" else settings.openai_model
                 },
                 "animation_stats": {
                     "scenes_planned": animation_result.scene_count,
