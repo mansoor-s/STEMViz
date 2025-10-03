@@ -11,6 +11,7 @@ google-genai>=0.8.0
 
 # TTS
 elevenlabs>=1.0.0
+openai>=1.0.0
 
 # Audio/Video Processing
 ffmpeg-python>=0.2.0

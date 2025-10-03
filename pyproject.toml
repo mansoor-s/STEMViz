@@ -1,0 +1,20 @@
+[project]
+name = "stemviz"
+version = "0.1.0"
+description = "AI-powered tool that transforms STEM concepts into narrated educational animations"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "elevenlabs>=1.0.0",
+    "ffmpeg-python>=0.2.0",
+    "google-genai>=0.8.0",
+    "gradio>=4.0.0",
+    "manim>=0.18.0",
+    "openai>=1.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "pydub>=0.25.1",
+    "python-dotenv>=1.0.0",
+    "requests>=2.31.0",
+    "webvtt-py>=0.5.0",
+]
